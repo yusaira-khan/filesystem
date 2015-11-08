@@ -13,17 +13,20 @@
 #include "disk_emu.h"
 #include "sfs_api.h"
 
+
 static int fuse_getattr(const char *path, struct stat *stbuf)
 {
     int res = 0;
     int size;
     
     memset(stbuf, 0, sizeof(struct stat));
+
+    printf("GEtattr %s\n", path);
     
     if (strcmp(path, "/") == 0) {
         stbuf->st_mode = S_IFDIR | 0755;
         stbuf->st_nlink = 2;
-    } else if((size = sfs_GetFileSize(path)) != -1) {
+    } else if((size = sfs_getfilesize(path)) != -1) {
         stbuf->st_mode = S_IFREG | 0666;
         stbuf->st_nlink = 1;
         stbuf->st_size = size;
@@ -37,6 +40,7 @@ static int fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         off_t offset, struct fuse_file_info *fi)
 {
     char file_name[MAXFILENAME];
+    printf("Readddir\n");
     
     if (strcmp(path, "/") != 0)
         return -ENOENT;
@@ -44,8 +48,8 @@ static int fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
     
-    while(sfs_get_next_filename(file_name)) {
-        filler(buf, &file_name[1], NULL, 0);
+    while(sfs_getnextfilename(file_name)) {
+        filler(buf, &file_name[0], NULL, 0);
     }
     
     return 0;
@@ -56,6 +60,7 @@ static int fuse_unlink(const char *path)
     int res;
     char filename[MAXFILENAME];
     
+    printf("unlink\n");
     strcpy(filename, path);
     res = sfs_remove(filename);
     if (res == -1)
@@ -69,6 +74,7 @@ static int fuse_open(const char *path, struct fuse_file_info *fi)
     int res;
     char filename[MAXFILENAME];
     
+    printf("open\n");
     strcpy(filename, path);
     
     res = sfs_fopen(filename);
@@ -87,6 +93,7 @@ static int fuse_read(const char *path, char *buf, size_t size, off_t offset,
     
     char filename[MAXFILENAME];
     
+    printf("read\n");
     strcpy(filename, path);
     
     fd = sfs_fopen(filename);
@@ -112,6 +119,7 @@ static int fuse_write(const char *path, const char *buf, size_t size,
     
     char filename[MAXFILENAME];
     
+    printf("write\n");
     strcpy(filename, path);
     
     fd = sfs_fopen(filename);
@@ -160,6 +168,7 @@ static int fuse_create (const char *path, mode_t mode, struct fuse_file_info *fp
     char filename[MAXFILENAME];
     int fd;
     
+    printf("create\n");
     strcpy(filename, path);
     fd = sfs_fopen(filename);
     
@@ -183,6 +192,5 @@ static struct fuse_operations xmp_oper = {
 int main(int argc, char *argv[])
 {
     mksfs(1);
-    
     return fuse_main(argc, argv, &xmp_oper, NULL);
 }
