@@ -1,6 +1,10 @@
 
 #define MAXFILENAME 16
 
+#define INODE_TABLE_BLOCK 1
+
+#define DIRECTORY_TABLE_BLOCK 2
+
 void mksfs(int fresh);
 int sfs_getnextfilename(char *fname);
 int sfs_getfilesize(const char* path);
@@ -33,14 +37,16 @@ typedef struct inode {
 
 typedef struct dir_entry { 
 	char name[MAXFILENAME];
-	unsigned int inode_idx;
+	int inode_idx;
 } dir_entry_t;
 
 
 typedef struct fd_table { 
-	unsigned int inode_idx;
+	int inode_idx;
 	unsigned int rd_write_ptr;
 } fd_table_t;
+
+
 
 
 

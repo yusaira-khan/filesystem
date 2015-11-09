@@ -1,27 +1,16 @@
 cmake_minimum_required(VERSION 3.3)
 project(filesystem)
-find_package(PkgConfig)
-pkg_check_modules(PC_FUSE "fuse" QUIET)
-set(FUSE_DEFINITIONS "${PC_FUSE_CFLAGS_OTHER}")
-find_path(
-        FUSE_INCLUDE_DIRS
-        NAMES fuse_common.h fuse_lowlevel.h fuse.h
-        PATHS "${PC_FUSE_INCLUDE_DIRS}"
-        DOC "Include directories for FUSE"
-)
-find_library(
-        FUSE_LIBRARIES
-        NAMES "fuse"
-        PATHS "${PC_FUSE_LIBRARY_DIRS}"
-        DOC "Libraries for FUSE"
-)
-#execute__process(COMMAND pkg-config fuse --cflags --libs OUTPUT_VARIABLE FUSE_FLAGS)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Werror")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Werror -std=gnu99")
+
 add_definitions(${FUSE_DEFINITIONS})
 include_directories(${FUSE_INCLUDE_DIRS})
+add_executable(sfs disk_emu.c sfs_api.c fuse_wrappers.c sfs_api.h)
+target_link_libraries(sfs ${FUSE_LIBRARIES})
+
+add_executable(test1 disk_emu.c sfs_api.c sfs_test.c sfs_api.h)
+target_link_libraries(test1 ${FUSE_LIBRARIES})
+
+add_executable(test2 disk_emu.c sfs_api.c sfs_test2.c sfs_api.h)
+target_link_libraries(test2 ${FUSE_LIBRARIES})
 
 
-set(S_SOURCE_FILES sfs_api.h)
-add_executable(server ${S_SOURCE_FILES})
-target_link_libraries(server)
-target_link_libraries(myapp ${FUSE_LIBRARIES})
