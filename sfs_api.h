@@ -1,5 +1,7 @@
 
 #define MAXFILENAME 16
+#define EXT_SIZE 3
+#define SEP '.'
 
 #define SUPERBLOCK 0
 #define UNAVAILABLE_BLOCK SUPERBLOCK
@@ -49,7 +51,7 @@ typedef struct inode {
 
 typedef struct indirect_data{
     unsigned int data_ptrs[MAX_DATA_PER_INDIRECT];
-};
+} indirect_t;
 
 typedef struct dir_entry { 
 	char name[MAXFILENAME];

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <assert.h>
 
 #define DISK_FILE "sfs_disk.disk"
 #define BLOCK_SIZE 512
@@ -21,8 +22,6 @@ fd_table_t fd_table[MAX_FILES];
 
 unsigned short all_blocks[MAX_BLOCKS];
 
-char file_data[] = "abcdefghijklmnopqrstuvwxyz";
-
 
 unsigned int get_free_inode() {
 
@@ -35,7 +34,7 @@ unsigned int get_free_inode() {
 }
 
 int get_free_filedescriptor() {
-    for (int i = 3; i < MAX_FILES; i++) {
+    for (int i = 0; i < MAX_FILES; i++) {
         if (!fd_table[i].inode_idx) {
             return i;
         }
@@ -104,10 +103,6 @@ void sync_sfs() {
     write_blocks(MAX_BLOCKS - 1, 1, &all_blocks);
 }
 
-void add_dummy_file_data() {
-
-    write_blocks(3, 1, &file_data);
-}
 
 void zero_everything() {
 
@@ -167,9 +162,9 @@ int sfs_getnextfilename(char *fname) {
 
     printf("Calling sfs get next file\n");
 
-    for (int looper = 0; looper< MAX_FILES; looper++){
-         current_file_ptr = (current_file_ptr + 1) % MAX_FILES;
-        if (root_dir[current_file_ptr].inode_idx){
+    for (int looper = 0; looper < MAX_FILES; looper++) {
+        current_file_ptr = (current_file_ptr + 1) % MAX_FILES;
+        if (root_dir[current_file_ptr].inode_idx) {
             strcpy(fname, root_dir[0].name);
             return 1;
         }
@@ -177,6 +172,7 @@ int sfs_getnextfilename(char *fname) {
     current_file_ptr = 0; //No file in directory
     return 0;
 }
+
 unsigned int get_directory_ptr_from_name(const char *name) {
     for (unsigned int i = FIRST_AVAILABLE_INODE; i < MAX_INODES; i++) {
         if (!root_dir[i].inode_idx) continue;
@@ -197,7 +193,6 @@ int sfs_getfilesize(const char *path) {
     inode_t inode = inode_table[inode_idx];
     return inode.size;
 }
-
 
 
 int check_if_file_open(int inode_idx) {
@@ -225,9 +220,7 @@ int sfs_fopen(char *name) {
     unsigned int fount_inode = root_dir[directory_ptr].inode_idx;
     int fd;
 
-    printf("Opening %s\n", name);
-
-    if (fount_inode == -1) {
+    if (!fount_inode) {
         unsigned int available_inode = get_free_inode(), available_block = get_free_block();
         if (!available_block || !available_inode) {
             fprintf(stderr, "No space to open file! All blocks or Inodes occupied.");
@@ -237,10 +230,18 @@ int sfs_fopen(char *name) {
         add_new_file_dir_entry(available_inode, name);
         add_new_inode(available_inode, 0x660, available_block);
         fount_inode = available_inode;
+        fd = -1;
+    } else {
+        fd = check_if_file_open(fount_inode);
     }
-    fd = check_if_file_open(fount_inode);
+
     if (fd == -1) {
         fd = get_free_filedescriptor();
+        printf("Opening %s fd:%d, inode:%u\n", name, fd, fount_inode);
+        if (fd == -1) {
+            fprintf(stderr, ("cannot open anymore files"));
+            return -3;
+        }
         fd_table[fd].inode_idx = fount_inode;
         fd_table[fd].rd_write_ptr = 0;
         return fd;
@@ -270,18 +271,33 @@ int sfs_fread(int fileID, char *buf, int length) {
         length = file_inode.size - cur_pos;
     }
 
-    if (length > 0) {
+    if (length <= 0) return length;
 
-        //find how many bloks to read
-        int block_idx = file_inode.data_ptrs[0];
+    int num_blocks = length / BLOCK_SIZE, incomplete_block = length % BLOCK_SIZE,
+            cur_block = cur_pos / BLOCK_SIZE, pos_in_block= cur_pos%BLOCK_SIZE,
+            last_block = file_inode.size/BLOCK_SIZE + pos_in_block ? 1 : 0,
+            bytes_used = 0,  read_length = 0;
+
+    assert(num_blocks <= last_block);
+    assert(last_block < MAX_DIRECT_DATA);
+    for (; cur_block <= num_blocks && cur_block< MAX_DIRECT_DATA;
+           cur_block++, bytes_used += read_length, pos_in_block = 0) {
+
+        int block_idx = file_inode.data_ptrs[cur_block];
+
+        if (cur_block==num_blocks){
+            read_length = BLOCK_SIZE - pos_in_block;
+        }else{
+            read_length = incomplete_block - pos_in_block;
+        }
         read_blocks(block_idx, 1, &buffer[0]);
-
-        //check if length > block in that case read more
-        memcpy(buf, buffer, length);
-        return length;
+        memcpy(buf + bytes_used, buffer+pos_in_block, read_length);
     }
 
-    return 0;
+    fd_table[fileID].rd_write_ptr += (unsigned) read_length;
+    return read_length;
+
+
 }
 
 int sfs_fwrite(int fileID, const char *buf, int length) {
@@ -294,20 +310,24 @@ int sfs_fwrite(int fileID, const char *buf, int length) {
 int sfs_fseek(int fileID, int loc) {
 
     //should check if loc is a valid length
+    if (loc < 0) return  -1;
+    inode_t i = inode_table[fd_table[fileID].inode_idx];
+    if (loc> i.size) return -2;
+    if (loc % BLOCK_SIZE > MAX_DIRECT_DATA) return -3;
 
-//    fd_table[fileID].rd_write_ptr = loc;
+    fd_table[fileID].rd_write_ptr = (unsigned) loc;
     return 0;
 }
 
 int sfs_remove(char *file) {
     const char *path = file;
     int directory_ptr = get_directory_ptr_from_name(path);
-    if (directory_ptr == -1){
-        fprintf(stderr,"Cannot remove file '%s'. File Does Not Exist",file);
+    if (directory_ptr == -1) {
+        fprintf(stderr, "Cannot remove file '%s'. File Does Not Exist", file);
         return -1;
     }
 
-    unsigned int inode_idx = root_dir[directory_ptr].inode_idx,block;
+    unsigned int inode_idx = root_dir[directory_ptr].inode_idx, block;
     inode_t cur_inode = inode_table[inode_idx];
 
     root_dir[directory_ptr].inode_idx = UNAVAILABLE_INODE;
@@ -315,16 +335,16 @@ int sfs_remove(char *file) {
 
     //clear the data blocks
     //set 0 in free block map where the file used to be
-    for(int i = 0; i<MAX_DIRECT_DATA; i++){
-        block =  cur_inode.data_ptrs[i];
-        if (block){
-           cur_inode.data_ptrs[i] = UNAVAILABLE_BLOCK;
+    for (int i = 0; i < MAX_DIRECT_DATA; i++) {
+        block = cur_inode.data_ptrs[i];
+        if (block) {
+            cur_inode.data_ptrs[i] = UNAVAILABLE_BLOCK;
             all_blocks[block] = FREE;
         }
         else break; //All inodes arranged serially
     }
     //Do the same for indirect ptrs
-    if (cur_inode.indirect_ptr){
+    if (cur_inode.indirect_ptr) {
 
         all_blocks[cur_inode.indirect_ptr] = 0;
 //        for(int i = 0; i<MAX_DATA_PER_INDIRECT; i++){
@@ -338,7 +358,7 @@ int sfs_remove(char *file) {
         cur_inode.indirect_ptr = 0;
     }
     cur_inode.size = 0;
-    cur_inode.link_cnt=0;
+    cur_inode.link_cnt = 0;
     cur_inode.mode = 0;
 
 
