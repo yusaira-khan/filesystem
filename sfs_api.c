@@ -273,19 +273,20 @@ int sfs_fread(int fileID, char *buf, int length) {
 
     if (length <= 0) return length;
 
-    int num_blocks = length / BLOCK_SIZE, incomplete_block = length % BLOCK_SIZE,
-            cur_block = cur_pos / BLOCK_SIZE, pos_in_block= cur_pos%BLOCK_SIZE,
-            last_block = file_inode.size/BLOCK_SIZE + pos_in_block ? 1 : 0,
+    int num_used_pts = length / BLOCK_SIZE, incomplete_block = length % BLOCK_SIZE,
+            cur_ptr = cur_pos / BLOCK_SIZE, pos_in_block= cur_pos%BLOCK_SIZE,
+            last_used_ptr = file_inode.size/BLOCK_SIZE + pos_in_block ? 1 : 0,
             bytes_used = 0,  read_length = 0;
+    num_used_pts += pos_in_block ? 1 :0;
+    assert(num_used_pts <= last_used_ptr); //lenght is not greater than file size
+    assert(last_used_ptr < MAX_DIRECT_DATA); //size is not greater than current limit
+    for (int block_idx =0 ; cur_ptr <= num_used_pts && cur_ptr < MAX_DIRECT_DATA;
+           cur_ptr++, bytes_used += read_length, pos_in_block = 0) {
 
-    assert(num_blocks <= last_block);
-    assert(last_block < MAX_DIRECT_DATA);
-    for (; cur_block <= num_blocks && cur_block< MAX_DIRECT_DATA;
-           cur_block++, bytes_used += read_length, pos_in_block = 0) {
+        block_idx = file_inode.data_ptrs[cur_ptr];
+        assert(block_idx); //block_idx cannot be empty since it's less than file size
 
-        int block_idx = file_inode.data_ptrs[cur_block];
-
-        if (cur_block==num_blocks){
+        if (cur_ptr == num_used_pts){
             read_length = BLOCK_SIZE - pos_in_block;
         }else{
             read_length = incomplete_block - pos_in_block;
@@ -301,10 +302,57 @@ int sfs_fread(int fileID, char *buf, int length) {
 }
 
 int sfs_fwrite(int fileID, const char *buf, int length) {
+    int inode_idx = fd_table[fileID].inode_idx;
+    unsigned int cur_pos = fd_table[fileID].rd_write_ptr;
+    char buffer[BLOCK_SIZE];
+
+    inode_t file_inode = inode_table[inode_idx];
+
+    //trying to read beyond the file
+    if (cur_pos + length > file_inode.size) {
+        length = file_inode.size - cur_pos;
+    }
+
+    if (length <= 0) return length;
+
+    int num_used_ptrs = length / BLOCK_SIZE, incomplete_block = length % BLOCK_SIZE,
+            cur_ptr = cur_pos / BLOCK_SIZE, pos_in_block= cur_pos%BLOCK_SIZE,
+            last_used_ptrs = file_inode.size/BLOCK_SIZE + pos_in_block ? 1 : 0,
+            bytes_used = 0,  read_length = 0;
+    num_used_ptrs += pos_in_block ? 1 :0;
+    assert(num_used_ptrs <= MAX_DIRECT_DATA);
+    assert(last_used_ptrs < MAX_DIRECT_DATA);
+    for (int block_idx=0; cur_ptr <= num_used_ptrs && cur_ptr < MAX_DIRECT_DATA;
+           cur_ptr++, bytes_used += read_length, pos_in_block = 0) {
+
+         block_idx = file_inode.data_ptrs[cur_ptr];
+        if (!block_idx){
+            block_idx = get_free_block();
+            if (!block_idx) {
+                fprintf(stderr, "Disk Full! Failed to write %d blocks.\n",length- read_length);
+                return read_length;
+            }
+            all_blocks[block_idx] = USED;
+
+        }
+
+        if (cur_ptr == num_used_ptrs){
+            read_length = BLOCK_SIZE - pos_in_block;
+        }else{
+            read_length = incomplete_block - pos_in_block;
+        }
+        write_blocks(block_idx, 1, &buffer[0]);
+        memcpy(buffer+pos_in_block,buf + bytes_used,  read_length);
+        fd_table[fileID].rd_write_ptr += (unsigned) read_length;
+        file_inode.size += cur_pos + read_length;
+    }
+    for (int unused_ptr = num_used_ptrs +1; unused_ptr <= last_used_ptrs; unused_ptr++){
+        int block_index = file_inode.data_ptrs[unused_ptr];
+        all_blocks[block_index] = FREE;
+    }
+    return read_length;
 
 
-    //Implement sfs_fwrite here
-    return 0;
 }
 
 int sfs_fseek(int fileID, int loc) {
